@@ -1,0 +1,390 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Resources:
+  Table:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      BillingMode: PAY_PER_REQUEST
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      TableName: !Sub ${AWS::StackName}-Table
+  FrontEnd:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${AWS::StackName}-frontend
+      WebsiteConfiguration:
+        IndexDocument: index.html
+  FileStore:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${AWS::StackName}-filestore
+  CreateNewFile:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-CreateNewFile
+      Description: !Sub
+        - Stack ${AWS::StackName} Function ${ResourceName}
+        - ResourceName: CreateNewFile
+      Architectures:
+        - arm64
+      CodeUri: src/CreateNewFile
+      Handler: index.handler
+      Runtime: nodejs20.x
+      MemorySize: 3008
+      Timeout: 300
+      Tracing: Active
+      Policies:
+        - Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Resource: !Join
+                - ''
+                - - !GetAtt FileStore.Arn
+                  - /*
+              Action:
+                - s3:PutObject
+                - s3:PutObjectAcl
+        - Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Resource: !GetAtt Table.Arn
+              Action:
+                - dynamodb:UpdateItem
+                - dynamodb:PutItem
+        - Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Resource: '*'
+              Action:
+                - polly:SynthesizeSpeech
+        - AWSXrayWriteOnlyAccess
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref Table
+          TABLE_ARN: !GetAtt Table.Arn
+          BUCKET_NAME: !Ref FileStore
+          BUCKET_ARN: !GetAtt FileStore.Arn
+      Events:
+        HttpApiPOSTfile:
+          Type: HttpApi
+          Properties:
+            Path: /file
+            Method: POST
+            ApiId: !Ref HttpApi
+            PayloadFormatVersion: '2.0'
+            TimeoutInMillis: 29000
+  DeleteFile:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-DeleteFile
+      Description: !Sub
+        - Stack ${AWS::StackName} Function ${ResourceName}
+        - ResourceName: DeleteFile
+      Architectures:
+        - arm64
+      CodeUri: src/DeleteFile
+      Handler: index.handler
+      Runtime: nodejs20.x
+      MemorySize: 3008
+      Timeout: 45
+      Tracing: Active
+      Policies:
+        - AWSXrayWriteOnlyAccess
+        - S3CrudPolicy:
+            BucketName: !Ref FileStore
+        - Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Resource: !GetAtt Table.Arn
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:DeleteItem
+        - Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Resource: !Join
+                - ''
+                - - !GetAtt FileStore.Arn
+                  - /*
+              Action:
+                - s3:DeleteObject
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref FileStore
+          BUCKET_ARN: !GetAtt FileStore.Arn
+          TABLE_NAME: !Ref Table
+          TABLE_ARN: !GetAtt Table.Arn
+      Events:
+        HttpApiDELETEfileid:
+          Type: HttpApi
+          Properties:
+            Path: /file/{id}
+            Method: DELETE
+            ApiId: !Ref HttpApi
+            PayloadFormatVersion: '2.0'
+            TimeoutInMillis: 29000
+  GetVoices:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-GetVoices
+      Description: !Sub
+        - Stack ${AWS::StackName} Function ${ResourceName}
+        - ResourceName: GetVoices
+      Architectures:
+        - arm64
+      CodeUri: src/GetVoices
+      Handler: index.handler
+      Runtime: nodejs20.x
+      MemorySize: 3008
+      Timeout: 60
+      Tracing: Active
+      Policies:
+        - AWSXrayWriteOnlyAccess
+        - Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Resource: '*'
+              Action:
+                - polly:DescribeVoices
+      Events:
+        HttpApiGETvoices:
+          Type: HttpApi
+          Properties:
+            Path: /voices
+            Method: GET
+            ApiId: !Ref HttpApi
+            PayloadFormatVersion: '2.0'
+            TimeoutInMillis: 29000
+  ListFiles:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-ListFiles
+      Description: !Sub
+        - Stack ${AWS::StackName} Function ${ResourceName}
+        - ResourceName: ListFiles
+      Architectures:
+        - arm64
+      CodeUri: src/ListFiles
+      Handler: index.handler
+      Runtime: nodejs20.x
+      MemorySize: 3008
+      Timeout: 30
+      Tracing: Active
+      Policies:
+        - AWSXrayWriteOnlyAccess
+        - Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Resource: !GetAtt Table.Arn
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Scan
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref Table
+          TABLE_ARN: !GetAtt Table.Arn
+      Events:
+        HttpApiGETfile:
+          Type: HttpApi
+          Properties:
+            Path: /file
+            Method: GET
+            ApiId: !Ref HttpApi
+            PayloadFormatVersion: '2.0'
+            TimeoutInMillis: 29000
+  Website:
+    Type: AWS::CodeBuild::Project
+    DependsOn: WebsiteRole
+    Properties:
+      Name: !Sub ${AWS::StackName}-Website
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+        Type: LINUX_CONTAINER
+        EnvironmentVariables:
+          - Name: API_URL
+            Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com
+      ServiceRole: !GetAtt WebsiteRole.Arn
+      Source:
+        Type: NO_SOURCE
+        BuildSpec: !Sub
+          - |-
+            version: 0.2
+            phases:
+              install:
+                runtime-versions:
+                  nodejs: 20
+                commands:
+                  - git clone ${SourceLocation} repo
+                  - cd repo
+                  - git checkout ${SourceVersion}
+                  - cd ${SourceDirectory}
+              pre_build:
+                commands:
+                  - npm install --omit=dev
+              build:
+                commands:
+                  - ${BuildCommand}
+              post_build:
+                commands:
+                  - if [ $CODEBUILD_BUILD_SUCCEEDING == 0 ]; then exit 1; fi
+                  - cd "${!CODEBUILD_SRC_DIR}/repo"
+                  - aws s3 sync '${PublishDirectory}' 's3://${DestinationBucketName}' --acl public-read --cache-control 'max-age=0, must-revalidate, public' --no-progress --delete
+          - PublishDirectory: src/frontend/build
+            BuildCommand: npm run production
+            SourceDirectory: src/frontend
+            DestinationBucketName: !Ref FrontEnd
+      Tags:
+        - Key: StackName
+          Value: !Sub ${AWS::StackName}
+  WebsiteEvents:
+    Type: AWS::Events::Rule
+    DependsOn: Website
+    Properties:
+      EventPattern:
+        source:
+          - aws.codebuild
+        detail-type:
+          - CodeBuild Build State Change
+        detail:
+          build-status:
+            - SUCCEEDED
+            - FAILED
+            - FAULT
+            - STOPPPED
+            - TIMED_OUT
+          project-name:
+            - !Ref Website
+      Targets:
+        - Arn: !GetAtt WebsiteBuildTrigger.Arn
+          Id: WebsiteBuildTrigger
+  WebsiteEventsPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn: WebsiteEvents
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt WebsiteBuildTrigger.Arn
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt WebsiteEvents.Arn
+  WebsiteRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-Website
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          Effect: Allow
+          Principal:
+            Service: codebuild.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+        - PolicyName: Logs
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${AWS::StackName}-Website:log-stream:*
+        - PolicyName: UploadToDestinationObjectStore
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:DeleteObject
+                  - s3:GetBucketLocation
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:PutObject
+                  - s3:PutObjectAcl
+                Resource:
+                  - !Sub ${FrontEnd.Arn}/*
+                  - !Sub ${FrontEnd.Arn}
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      DefinitionBody:
+        openapi: '3.0'
+        info:
+          title: !Sub ${AWS::StackName}-HttpApi
+          version: '1.0'
+        paths:
+          /voices:
+            get:
+              responses: {}
+          /file:
+            get:
+              responses: {}
+            post:
+              responses: {}
+          /file/{id}:
+            delete:
+              responses: {}
+      FailOnWarnings: true
+      CorsConfiguration:
+        AllowOrigins:
+          - !Sub http://${AWS::StackName}-frontend.s3-website-${AWS::Region}.amazonaws.com
+          - http://localhost:3000
+        AllowMethods:
+          - '*'
+        AllowHeaders:
+          - Authorization
+          - Content-Type
+  WebsiteBuildTrigger:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-WebsiteBuildTrigger
+      Description: !Sub
+        - Stack ${AWS::StackName} Function ${ResourceName}
+        - ResourceName: WebsiteBuildTrigger
+      Architectures:
+        - arm64
+      CodeUri: src/WebsiteBuildTrigger
+      Handler: index.handler
+      Runtime: nodejs20.x
+      MemorySize: 3008
+      Timeout: 30
+      Tracing: Active
+      Policies:
+        - AWSXrayWriteOnlyAccess
+        - Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Resource: !GetAtt Website.Arn
+              Action:
+                - codebuild:StartBuild
+  WebsiteBuildTriggerDeployTrigger:
+    Type: Custom::FunctionDeployTrigger
+    DependsOn: WebsiteEvents
+    Properties:
+      ServiceToken: !GetAtt WebsiteBuildTrigger.Arn
+      Type: website
+      ProjectName: !Ref Website
+      SourceVersion: !Ref SourceVersion
+Parameters:
+  SourceLocation:
+    Type: String
+    Description: Location of source code for deployment (designed to work with public Github repos)
+    Default: https://github.com/Cyx06/text-to-speech-converter.git
+  SourceVersion:
+    Type: String
+    Description: Source version for deployment (i.e. Git SHA)
+Outputs:
+  ApiURL:
+    Description: The URL for the API
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com
+  FrontendURL:
+    Description: The URL of the S3 bucket containing the built frontend
+    Value: !GetAtt FrontEnd.WebsiteURL
