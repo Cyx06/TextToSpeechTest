@@ -75,7 +75,6 @@ export const handler = async (message) => {
 
     const s3Client = new S3Client({ region: process.env.AWS_REGION });
     const s3Command = new PutObjectCommand({
-      ACL: 'public-read',
       Bucket: process.env.BUCKET_NAME,
       Key: `${id}.mp3`,
       Body: fs.createReadStream(`/tmp/${id}.mp3`),
@@ -108,7 +107,7 @@ export const handler = async (message) => {
     console.log('Setting DynamoDB status to FAILED');
 
     const failDynamo = await ddbDocClient.send(
-      new UpdateComment({
+      new UpdateCommand({
         TableName: process.env.TABLE_NAME,
         Key: { id },
         UpdateExpression: 'SET #file_status = :status',
