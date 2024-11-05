@@ -1,0 +1,394 @@
+AWSTemplateFormatVersion: 2010-09-09  # 定義模板的格式版本
+Transform: AWS::Serverless-2016-10-31  # 指定使用的轉換工具，這裡是 AWS Serverless 模板
+
+Resources:  # 定義資源的區塊
+  Table:  # 資源名稱為 Table
+    Type: AWS::DynamoDB::Table  # 資源類型為 DynamoDB 表
+    Properties:  # 資源的屬性
+      AttributeDefinitions:  # 定義屬性
+        - AttributeName: id  # 屬性名稱為 id
+          AttributeType: S  # 屬性類型為字串 (S)
+      BillingMode: PAY_PER_REQUEST  # 設定計費模式為按需計費
+      KeySchema:  # 定義主鍵結構
+        - AttributeName: id  # 主鍵名稱為 id
+          KeyType: HASH  # 主鍵類型為哈希鍵
+      StreamSpecification:  # 設定流的規範
+        StreamViewType: NEW_AND_OLD_IMAGES  # 讀取新舊影像的流視圖類型
+      TableName: !Sub ${AWS::StackName}-Table  # 表的名稱，使用堆疊名稱作為前綴
+
+  FrontEnd:  # 資源名稱為 FrontEnd
+    Type: AWS::S3::Bucket  # 資源類型為 S3 存儲桶
+    Properties:  # 資源的屬性
+      BucketName: !Sub ${AWS::StackName}-frontend  # 存儲桶名稱，使用堆疊名稱作為前綴
+      WebsiteConfiguration:  # 設定網站配置
+        IndexDocument: index.html  # 指定網站的索引文檔
+
+  FileStore:  # 資源名稱為 FileStore
+    Type: AWS::S3::Bucket  # 資源類型為 S3 存儲桶
+    Properties:  # 資源的屬性
+      BucketName: !Sub ${AWS::StackName}-filestore  # 存儲桶名稱，使用堆疊名稱作為前綴
+  CreateNewFile:  # 資源名稱為 CreateNewFile
+    Type: AWS::Serverless::Function  # 資源類型為 AWS Serverless 函數
+    Properties:  # 資源的屬性
+      FunctionName: !Sub ${AWS::StackName}-CreateNewFile  # 函數名稱，使用堆疊名稱作為前綴
+      Description: !Sub  # 函數描述
+        - Stack ${AWS::StackName} Function ${ResourceName}  # 堆疊和資源名稱的描述
+        - ResourceName: CreateNewFile  # 資源名稱
+      Architectures:  # 指定函數的架構
+        - arm64  # 使用 ARM64 架構
+      CodeUri: src/CreateNewFile  # 指向代碼位置的 URI
+      Handler: index.handler  # 指定函數的處理程序
+      Runtime: nodejs20.x  # 設定運行時環境為 Node.js 20.x
+      MemorySize: 3008  # 指定函數的內存大小為 3008 MB
+      Timeout: 300  # 設定函數的超時時間為 300 秒
+      Tracing: Active  # 啟用追蹤功能
+      Policies:  # 設定權限策略
+        - Version: 2012-10-17  # 策略版本
+          Statement:  # 策略聲明
+            - Effect: Allow  # 允許的效果
+              Resource: !Join  # 指定資源
+                - ''  # 空字符串用於拼接
+                - - !GetAtt FileStore.Arn  # 獲取 FileStore 存儲桶的 ARN
+                  - /*  # 允許對所有對象的操作
+              Action:  # 允許的操作
+                - s3:PutObject  # 允許上傳對象到 S3
+                - s3:PutObjectAcl  # 允許設置對象的 ACL
+        - Version: 2012-10-17  # 策略版本
+          Statement:  # 策略聲明
+            - Effect: Allow  # 允許的效果
+              Resource: !GetAtt Table.Arn  # 獲取 Table 的 ARN
+              Action:  # 允許的操作
+                - dynamodb:UpdateItem  # 允許更新 DynamoDB 表中的項
+                - dynamodb:PutItem  # 允許在 DynamoDB 表中添加項
+        - Version: 2012-10-17  # 策略版本
+          Statement:  # 策略聲明
+            - Effect: Allow  # 允許的效果
+              Resource: '*'  # 允許所有資源
+              Action:  # 允許的操作
+                - polly:SynthesizeSpeech  # 允許使用 Polly 進行語音合成
+        - AWSXrayWriteOnlyAccess  # 內建的權限策略，用於寫入 AWS X-Ray 的權限
+      Environment:  # 環境變數配置
+        Variables:  # 環境變數
+          TABLE_NAME: !Ref Table  # DynamoDB 表的名稱
+          TABLE_ARN: !GetAtt Table.Arn  # 獲取 DynamoDB 表的 ARN
+          BUCKET_NAME: !Ref FileStore  # S3 存儲桶的名稱
+          BUCKET_ARN: !GetAtt FileStore.Arn  # 獲取 S3 存儲桶的 ARN
+      Events:  # 事件觸發器配置
+        HttpApiPOSTfile:  # 事件名稱
+          Type: HttpApi  # 事件類型為 HttpApi
+          Properties:  # 事件的屬性
+            Path: /file  # API 路徑
+            Method: POST  # HTTP 方法為 POST
+            ApiId: !Ref HttpApi  # 指向 HttpApi 的引用
+            PayloadFormatVersion: '2.0'  # 載荷格式版本
+            TimeoutInMillis: 29000  # 事件的超時時間設為 29000 毫秒
+  DeleteFile:  # 資源名稱為 DeleteFile
+    Type: AWS::Serverless::Function  # 資源類型為 AWS Serverless 函數
+    Properties:  # 資源的屬性
+      FunctionName: !Sub ${AWS::StackName}-DeleteFile  # 函數名稱，使用堆疊名稱作為前綴
+      Description: !Sub  # 函數描述
+        - Stack ${AWS::StackName} Function ${ResourceName}  # 堆疊和資源名稱的描述
+        - ResourceName: DeleteFile  # 資源名稱
+      Architectures:  # 指定函數的架構
+        - arm64  # 使用 ARM64 架構
+      CodeUri: src/DeleteFile  # 指向代碼位置的 URI
+      Handler: index.handler  # 指定函數的處理程序
+      Runtime: nodejs20.x  # 設定運行時環境為 Node.js 20.x
+      MemorySize: 3008  # 指定函數的內存大小為 3008 MB
+      Timeout: 45  # 設定函數的超時時間為 45 秒
+      Tracing: Active  # 啟用追蹤功能
+      Policies:  # 設定權限策略
+        - AWSXrayWriteOnlyAccess  # 內建的權限策略，用於寫入 AWS X-Ray 的權限
+        - S3CrudPolicy:  # 自訂的 S3 CRUD 權限策略
+            BucketName: !Ref FileStore  # 指定 S3 存儲桶名稱
+        - Version: 2012-10-17  # 策略版本
+          Statement:  # 策略聲明
+            - Effect: Allow  # 允許的效果
+              Resource: !GetAtt Table.Arn  # 獲取 Table 的 ARN
+              Action:  # 允許的操作
+                - dynamodb:GetItem  # 允許從 DynamoDB 表中獲取項
+                - dynamodb:DeleteItem  # 允許從 DynamoDB 表中刪除項
+        - Version: 2012-10-17  # 策略版本
+          Statement:  # 策略聲明
+            - Effect: Allow  # 允許的效果
+              Resource: !Join  # 指定資源
+                - ''  # 空字符串用於拼接
+                - - !GetAtt FileStore.Arn  # 獲取 FileStore 存儲桶的 ARN
+                  - /*  # 允許對所有對象的操作
+              Action:  # 允許的操作
+                - s3:DeleteObject  # 允許刪除 S3 存儲桶中的對象
+      Environment:  # 環境變數配置
+        Variables:  # 環境變數
+          BUCKET_NAME: !Ref FileStore  # S3 存儲桶的名稱
+          BUCKET_ARN: !GetAtt FileStore.Arn  # 獲取 S3 存儲桶的 ARN
+          TABLE_NAME: !Ref Table  # DynamoDB 表的名稱
+          TABLE_ARN: !GetAtt Table.Arn  # 獲取 DynamoDB 表的 ARN
+      Events:  # 事件觸發器配置
+        HttpApiDELETEfileid:  # 事件名稱
+          Type: HttpApi  # 事件類型為 HttpApi
+          Properties:  # 事件的屬性
+            Path: /file/{id}  # API 路徑，包含文件 ID 的路徑參數
+            Method: DELETE  # HTTP 方法為 DELETE
+            ApiId: !Ref HttpApi  # 指向 HttpApi 的引用
+            PayloadFormatVersion: '2.0'  # 載荷格式版本
+            TimeoutInMillis: 29000  # 事件的超時時間設為 29000 毫秒
+  GetVoices:  # 資源名稱為 GetVoices
+    Type: AWS::Serverless::Function  # 資源類型為 AWS Serverless 函數
+    Properties:  # 資源的屬性
+      FunctionName: !Sub ${AWS::StackName}-GetVoices  # 函數名稱，使用堆疊名稱作為前綴
+      Description: !Sub  # 函數描述
+        - Stack ${AWS::StackName} Function ${ResourceName}  # 堆疊和資源名稱的描述
+        - ResourceName: GetVoices  # 資源名稱
+      Architectures:  # 指定函數的架構
+        - arm64  # 使用 ARM64 架構
+      CodeUri: src/GetVoices  # 指向代碼位置的 URI
+      Handler: index.handler  # 指定函數的處理程序
+      Runtime: nodejs20.x  # 設定運行時環境為 Node.js 20.x
+      MemorySize: 3008  # 指定函數的內存大小為 3008 MB
+      Timeout: 60  # 設定函數的超時時間為 60 秒
+      Tracing: Active  # 啟用追蹤功能
+      Policies:  # 設定權限策略
+        - AWSXrayWriteOnlyAccess  # 內建的權限策略，用於寫入 AWS X-Ray 的權限
+        - Version: 2012-10-17  # 策略版本
+          Statement:  # 策略聲明
+            - Effect: Allow  # 允許的效果
+              Resource: '*'  # 允許對所有資源的訪問
+              Action:  # 允許的操作
+                - polly:DescribeVoices  # 允許調用 Polly 的 DescribeVoices 操作
+      Events:  # 事件觸發器配置
+        HttpApiGETvoices:  # 事件名稱
+          Type: HttpApi  # 事件類型為 HttpApi
+          Properties:  # 事件的屬性
+            Path: /voices  # API 路徑
+            Method: GET  # HTTP 方法為 GET
+            ApiId: !Ref HttpApi  # 指向 HttpApi 的引用
+            PayloadFormatVersion: '2.0'  # 載荷格式版本
+            TimeoutInMillis: 29000  # 事件的超時時間設為 29000 毫秒
+  ListFiles:  # 資源名稱為 ListFiles
+    Type: AWS::Serverless::Function  # 資源類型為 AWS Serverless 函數
+    Properties:  # 資源的屬性
+      FunctionName: !Sub ${AWS::StackName}-ListFiles  # 函數名稱，使用堆疊名稱作為前綴
+      Description: !Sub  # 函數描述
+        - Stack ${AWS::StackName} Function ${ResourceName}  # 堆疊和資源名稱的描述
+        - ResourceName: ListFiles  # 資源名稱
+      Architectures:  # 指定函數的架構
+        - arm64  # 使用 ARM64 架構
+      CodeUri: src/ListFiles  # 指向代碼位置的 URI
+      Handler: index.handler  # 指定函數的處理程序
+      Runtime: nodejs20.x  # 設定運行時環境為 Node.js 20.x
+      MemorySize: 3008  # 指定函數的內存大小為 3008 MB
+      Timeout: 30  # 設定函數的超時時間為 30 秒
+      Tracing: Active  # 啟用追蹤功能
+      Policies:  # 設定權限策略
+        - AWSXrayWriteOnlyAccess  # 內建的權限策略，用於寫入 AWS X-Ray 的權限
+        - Version: 2012-10-17  # 策略版本
+          Statement:  # 策略聲明
+            - Effect: Allow  # 允許的效果
+              Resource: !GetAtt Table.Arn  # 允許訪問的資源為 DynamoDB 表的 ARN
+              Action:  # 允許的操作
+                - dynamodb:GetItem  # 允許獲取表中的項目
+                - dynamodb:Scan  # 允許掃描表中的所有項目
+      Environment:  # 環境變數配置
+        Variables:  # 環境變數列表
+          TABLE_NAME: !Ref Table  # 表的名稱
+          TABLE_ARN: !GetAtt Table.Arn  # 表的 ARN
+      Events:  # 事件觸發器配置
+        HttpApiGETfile:  # 事件名稱
+          Type: HttpApi  # 事件類型為 HttpApi
+          Properties:  # 事件的屬性
+            Path: /file  # API 路徑
+            Method: GET  # HTTP 方法為 GET
+            ApiId: !Ref HttpApi  # 指向 HttpApi 的引用
+            PayloadFormatVersion: '2.0'  # 載荷格式版本
+            TimeoutInMillis: 29000  # 事件的超時時間設為 29000 毫秒
+  Website:  # 資源名稱為 Website
+    Type: AWS::CodeBuild::Project  # 資源類型為 CodeBuild 項目
+    DependsOn: WebsiteRole  # 依賴於 WebsiteRole 資源
+    Properties:  # 資源的屬性
+      Name: !Sub ${AWS::StackName}-Website  # 項目名稱，使用堆疊名稱作為前綴
+      Artifacts:  # 產出物設定
+        Type: NO_ARTIFACTS  # 不產生任何產出物
+      Environment:  # 環境配置
+        ComputeType: BUILD_GENERAL1_SMALL  # 計算類型為小型構建
+        Image: aws/codebuild/standard:7.0  # 使用的 CodeBuild 映像版本
+        Type: LINUX_CONTAINER  # 環境類型為 Linux 容器
+        EnvironmentVariables:  # 環境變數配置
+          - Name: API_URL  # 環境變數名稱
+            Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com  # 環境變數的值，指向 API 的 URL
+      ServiceRole: !GetAtt WebsiteRole.Arn  # 指向 WebsiteRole 的 ARN 作為服務角色
+      Source:  # 來源配置
+        Type: NO_SOURCE  # 沒有來源
+        BuildSpec: !Sub  # 使用的構建規範
+          - |-
+            version: 0.2  # 構建規範版本
+            phases:  # 構建階段
+              install:  # 安裝階段
+                runtime-versions:  # 設定運行時版本
+                  nodejs: 20  # 使用 Node.js 20
+                commands:  # 執行的命令
+                  - git clone ${SourceLocation} repo  # 從源位置克隆代碼庫
+                  - cd repo  # 進入克隆的代碼庫目錄
+                  - git checkout ${SourceVersion}  # 切換到指定的源版本
+                  - cd ${SourceDirectory}  # 進入源目錄
+              pre_build:  # 預構建階段
+                commands:  # 執行的命令
+                  - npm install --omit=dev  # 安裝依賴，省略開發依賴
+              build:  # 構建階段
+                commands:  # 執行的命令
+                  - ${BuildCommand}  # 執行構建命令
+              post_build:  # 構建後階段
+                commands:  # 執行的命令
+                  - if [ $CODEBUILD_BUILD_SUCCEEDING == 0 ]; then exit 1; fi  # 如果構建失敗則退出
+                  - cd "${!CODEBUILD_SRC_DIR}/repo"  # 進入代碼庫目錄
+                  - aws s3 sync '${PublishDirectory}' 's3://${DestinationBucketName}' --acl public-read --cache-control 'max-age=0, must-revalidate, public' --no-progress --delete  # 同步構建結果到 S3
+          - PublishDirectory: src/frontend/build  # 構建成果目錄
+            BuildCommand: npm run production  # 構建命令
+            SourceDirectory: src/frontend  # 源目錄
+            DestinationBucketName: !Ref FrontEnd  # 目標 S3 存儲桶的引用
+      Tags:  # 標籤配置
+        - Key: StackName  # 標籤鍵
+          Value: !Sub ${AWS::StackName}  # 標籤值，使用堆疊名稱
+  WebsiteEvents:  # 資源名稱為 WebsiteEvents
+    Type: AWS::Events::Rule  # 資源類型為 EventBridge 規則
+    DependsOn: Website  # 依賴於 Website 資源
+    Properties:  # 資源的屬性
+      EventPattern:  # 事件模式
+        source:  # 事件來源
+          - aws.codebuild  # 來源為 AWS CodeBuild
+        detail-type:  # 事件細節類型
+          - CodeBuild Build State Change  # 事件類型為 CodeBuild 的構建狀態變更
+        detail:  # 事件的具體細節
+          build-status:  # 構建狀態過濾器
+            - SUCCEEDED  # 構建成功
+            - FAILED  # 構建失敗
+            - FAULT  # 構建出錯
+            - STOPPED  # 構建已停止
+            - TIMED_OUT  # 構建超時
+          project-name:  # 項目名稱過濾器
+            - !Ref Website  # 指向 Website 項目的引用
+      Targets:  # 目標設定
+        - Arn: !GetAtt WebsiteBuildTrigger.Arn  # 目標的 ARN，指向 WebsiteBuildTrigger 的 ARN
+          Id: WebsiteBuildTrigger  # 目標 ID
+  WebsiteEventsPermission:  # 資源名稱為 WebsiteEventsPermission
+    Type: AWS::Lambda::Permission  # 資源類型為 Lambda 的權限
+    DependsOn: WebsiteEvents  # 依賴於 WebsiteEvents 資源
+    Properties:  # 資源的屬性
+      Action: lambda:InvokeFunction  # 設定的動作為調用 Lambda 函數
+      FunctionName: !GetAtt WebsiteBuildTrigger.Arn  # 目標 Lambda 函數的 ARN
+      Principal: events.amazonaws.com  # 允許的主體，這裡是 EventBridge
+      SourceArn: !GetAtt WebsiteEvents.Arn  # 來源 ARN，這是從 WebsiteEvents 獲取的 ARN
+  WebsiteRole:  # 資源名稱為 WebsiteRole
+    Type: AWS::IAM::Role  # 資源類型為 IAM 角色
+    Properties:  # 資源的屬性
+      RoleName: !Sub ${AWS::StackName}-Website  # 角色名稱，基於 Stack 名稱動態生成
+      AssumeRolePolicyDocument:  # 假設角色的策略文件
+        Version: 2012-10-17  # 策略文件版本
+        Statement:
+          Effect: Allow  # 允許的效果
+          Principal:  # 角色的主要身份
+            Service: codebuild.amazonaws.com  # 允許 AWS CodeBuild 服務假設此角色
+          Action: sts:AssumeRole  # 允許的操作為假設角色
+      Policies:  # 定義角色的政策
+        - PolicyName: Logs  # 政策名稱為 Logs
+          PolicyDocument:  # 政策文件
+            Version: 2012-10-17  # 策略文件版本
+            Statement:
+              - Effect: Allow  # 允許的效果
+                Action:
+                  - logs:CreateLogGroup  # 允許創建日誌組
+                  - logs:CreateLogStream  # 允許創建日誌流
+                  - logs:PutLogEvents  # 允許發送日誌事件
+                Resource:
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${AWS::StackName}-Website:log-stream:*  # 允許訪問的資源，這裡是 CodeBuild 的日誌組
+        - PolicyName: UploadToDestinationObjectStore  # 政策名稱為 UploadToDestinationObjectStore
+          PolicyDocument:  # 政策文件
+            Version: 2012-10-17  # 策略文件版本
+            Statement:
+              - Effect: Allow  # 允許的效果
+                Action:
+                  - s3:DeleteObject  # 允許刪除物件
+                  - s3:GetBucketLocation  # 允許獲取桶的位置信息
+                  - s3:GetObject  # 允許獲取物件
+                  - s3:ListBucket  # 允許列出桶中的物件
+                  - s3:PutObject  # 允許放置物件
+                  - s3:PutObjectAcl  # 允許設置物件 ACL
+                Resource:
+                  - !Sub ${FrontEnd.Arn}/*  # 允許訪問 FrontEnd S3 桶中的所有物件
+                  - !Sub ${FrontEnd.Arn}  # 允許訪問 FrontEnd S3 桶
+  HttpApi:  # 資源名稱為 HttpApi
+    Type: AWS::Serverless::HttpApi  # 資源類型為 Serverless HttpApi
+    Properties:  # 資源的屬性
+      DefinitionBody:  # 定義 API 的內容
+        openapi: '3.0'  # 使用 OpenAPI 3.0 標準
+        info:  # API 的基本信息
+          title: !Sub ${AWS::StackName}-HttpApi  # API 標題，根據 Stack 名稱動態生成
+          version: '1.0'  # API 版本
+        paths:  # 定義 API 的路徑和操作
+          /voices:  # 定義 /voices 路徑
+            get:  # GET 方法
+              responses: {}  # 響應內容，可根據需求擴展
+          /file:  # 定義 /file 路徑
+            get:  # GET 方法
+              responses: {}  # 響應內容
+            post:  # POST 方法
+              responses: {}  # 響應內容
+          /file/{id}:  # 定義 /file/{id} 路徑，用於刪除特定文件
+            delete:  # DELETE 方法
+              responses: {}  # 響應內容
+      FailOnWarnings: true  # 如果存在警告則構建失敗
+      CorsConfiguration:  # 配置 CORS
+        AllowOrigins:  # 允許的源
+          - !Sub http://${AWS::StackName}-frontend.s3-website-${AWS::Region}.amazonaws.com  # 允許從前端 S3 網站訪問
+          - http://localhost:3000  # 允許本地開發環境訪問
+        AllowMethods:  # 允許的 HTTP 方法
+          - '*'  # 允許所有 HTTP 方法
+        AllowHeaders:  # 允許的請求頭
+          - Authorization  # 允許 Authorization 請求頭
+          - Content-Type  # 允許 Content-Type 請求頭
+  WebsiteBuildTrigger:  # 資源名稱為 WebsiteBuildTrigger
+    Type: AWS::Serverless::Function  # 資源類型為 Serverless Function
+    Properties:  # 資源的屬性
+      FunctionName: !Sub ${AWS::StackName}-WebsiteBuildTrigger  # 函數名稱，根據 Stack 名稱動態生成
+      Description: !Sub  # 函數描述
+        - Stack ${AWS::StackName} Function ${ResourceName}  # 動態生成描述
+        - ResourceName: WebsiteBuildTrigger  # 資源名稱
+      Architectures:  # 指定運行架構
+        - arm64  # 使用 arm64 架構
+      CodeUri: src/WebsiteBuildTrigger  # 代碼位置
+      Handler: index.handler  # 函數的入口點
+      Runtime: nodejs20.x  # 執行環境為 Node.js 20.x
+      MemorySize: 3008  # 指定內存大小為 3008 MB
+      Timeout: 30  # 函數執行超時設定為 30 秒
+      Tracing: Active  # 開啟 AWS X-Ray 追蹤
+      Policies:  # 角色的權限策略
+        - AWSXrayWriteOnlyAccess  # 允許寫入 X-Ray
+        - Version: 2012-10-17  # 策略版本
+          Statement:  # 權限聲明
+            - Effect: Allow  # 允許的效果
+              Resource: !GetAtt Website.Arn  # 目標資源為 Website 的 ARN
+              Action:  # 允許的操作
+                - codebuild:StartBuild  # 允許觸發 CodeBuild 建置
+  WebsiteBuildTriggerDeployTrigger:  # 資源名稱為 WebsiteBuildTriggerDeployTrigger
+    Type: Custom::FunctionDeployTrigger  # 定義為自訂資源，通常用於觸發其他 AWS 服務的行為
+    DependsOn: WebsiteEvents  # 此資源依賴於 WebsiteEvents，確保先創建 WebsiteEvents
+    Properties:  # 資源的屬性
+      ServiceToken: !GetAtt WebsiteBuildTrigger.Arn  # 指定觸發器的服務令牌，使用 WebsiteBuildTrigger 的 ARN
+      Type: website  # 自訂資源的類型，這裡指定為 website
+      ProjectName: !Ref Website  # 參考 Website 資源的名稱
+      SourceVersion: !Ref SourceVersion  # 參考 SourceVersion，可能是來源版本的標識
+Parameters:
+  SourceLocation:
+    Type: String  # 定義參數類型為字符串
+    Description: Location of source code for deployment (designed to work with public Github repos)  # 參數描述
+    Default: https://github.com/Cyx06/TextToSpeechTest  # 預設值為一個公共 GitHub 倉庫的 URL
+  SourceVersion:
+    Type: String  # 定義參數類型為字符串
+    Description: Source version for deployment (i.e. Git SHA)  # 參數描述，表示用於部署的來源版本
+Outputs:
+  ApiURL:
+    Description: The URL for the API  # 輸出描述，表示 API 的 URL
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com  # 使用 !Sub 來生成 API 的完整 URL，根據 HttpApi 的名稱和當前區域
+  FrontendURL:
+    Description: The URL of the S3 bucket containing the built frontend  # 輸出描述，表示包含構建前端的 S3 存儲桶的 URL
+    Value: !GetAtt FrontEnd.WebsiteURL  # 獲取 FrontEnd 資源的 WebsiteURL 屬性，這是 S3 存儲桶的 URL
+
