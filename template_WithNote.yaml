@@ -2,6 +2,41 @@ AWSTemplateFormatVersion: 2010-09-09  # 定義模板的格式版本
 Transform: AWS::Serverless-2016-10-31  # 指定使用的轉換工具，這裡是 AWS Serverless 模板
 
 Resources:  # 定義資源的區塊
+# Resources是用來定義全部你會用到的資源 這邊包含Table, FrontEnd, FileStore, CreateNewFile, DeleteFile, GetVoice, ListFiles, Website, WebsiteEvents
+
+# Table (DynamoDB 表)：用於存儲數據，例如文件的 metadata 或其他應用數據。此表使用 id 作為主鍵，並啟用了按需計費模式。
+# FrontEnd (S3 存儲桶)：用於部署網站前端，設定為靜態網站，並將 index.html 設定為主頁。這樣用戶可以通過 HTTP 請求訪問前端。
+# FileStore (S3 存儲桶)：用於存放文件，例如用戶上傳的文件或應用所需的靜態資源。
+# CreateNewFile (Lambda 函數)：當接收到 POST 請求時，該函數負責創建新文件，將其上傳至 FileStore S3 存儲桶，並將文件相關數據保存到 DynamoDB 表中。
+# DeleteFile (Lambda 函數)：處理 DELETE 請求，負責從 S3 存儲桶中刪除指定文件，並在 DynamoDB 表中刪除文件的 metadata。
+# GetVoices (Lambda 函數)：處理 GET 請求，調用 AWS Polly API 獲取語音列表，用於應用中可能的語音選項。
+# ListFiles (Lambda 函數)：處理 GET 請求，列出 DynamoDB 表中的文件信息，可以用於前端展示所有文件列表。
+# Website (CodeBuild 項目)：負責前端網站的自動構建和部署。該項目從指定的 Git 倉庫克隆代碼，安裝依賴，構建並將前端部署到 FrontEnd S3 存儲桶中。
+# WebsiteEvents (EventBridge 規則)：監控 CodeBuild 構建狀態，觸發後續事件（例如發送通知或更新狀態）。
+
+  # 1. Table (DynamoDB 表)
+  # 在 AWS 中，DynamoDB 是一種完全管理的 NoSQL 資料庫服務，專門用來處理高吞吐量和低延遲的資料存取。DynamoDB 表 是儲存資料的基本單位，並且支援高度擴展。
+  # Primary Key (主鍵)：DynamoDB 表的每一個項目都有一個主鍵，它可以由兩個部分組成：
+  # Partition Key：每一個項目使用的唯一識別符，可以是單一屬性。
+  # Composite Key：若你的資料有更多複雜的存取需求，可以使用復合主鍵，它由 Partition Key 和 Sort Key 組成。這樣可以根據不同的條件篩選資料。
+  # Attributes (屬性)：DynamoDB 的項目是由屬性組成的，這些屬性可以是各種資料型態，如字串、數字、布林值等。你可以在表中存儲任意數量的屬性，不過主鍵是必須的。
+  # Provisioned vs. On-demand Capacity (容量模式)：
+  # Provisioned Capacity：預設為每秒一定的讀寫容量，適合有穩定讀寫需求的應用。
+  # On-demand Capacity：自動擴展，適合負載不可預測的應用，會根據需求自動調整讀寫吞吐量。
+  # 在實際應用中，DynamoDB 表 常用於存儲需要高可擴展性和低延遲存取的資料，像是用戶資料、商品庫存、會話資料等。其優點是可以快速查詢和寫入大量資料，並且支持地理分佈的多區域資料庫。
+
+  # 用途：DynamoDB 是 AWS 提供的一個全託管 NoSQL 資料庫服務。這個表用於存儲您的應用程序數據，例如文件的 metadata（例如文件名、大小、上傳時間、類型等），以及其他應用所需的數據。可以視為一個高效能、可擴展的數據庫來保存結構化或半結構化數據。
+  # 如何使用：DynamoDB 表可以設置主鍵，通常是“id”欄位，這使得每個記錄都是唯一的，並且可以快速進行查詢。該表還啟用了「按需計費模式」，這意味著系統會根據實際的讀寫請求量自動調整容量，您無需管理容量設置，適合流量不穩定或無法預測的場景。
+  # 缺少後果：如果沒有 DynamoDB 表來存儲文件的 metadata，應用就無法持久化文件的相關信息（如文件名稱、上傳時間、大小等）。這將導致您無法檢索和管理文件的元數據，無法在前端顯示文件列表，甚至無法在刪除文件時同步刪除其相關信息，影響應用的功能和資料一致性。
+  # 創建依據：
+  # 為什麼使用 DynamoDB：DynamoDB 是 AWS 提供的完全管理型 NoSQL 資料庫，適合需要高效查詢、可擴展性和高可用性的應用場景。對於需要存儲文件元數據（如文件名稱、大小、上傳時間等）這類資料，DynamoDB 是理想選擇。它支援快速的讀取和寫入操作，並且可以自動擴展，無需手動管理容量。
+  # 資源部署細節：
+  # 主鍵設計：通常會選擇一個 id 作為主鍵（partition key），用於唯一標識每個文件的 metadata。
+  # 計費模式：選擇按需計費（On-Demand），讓您無需預先設定容量單位。這種模式會自動根據流量進行擴展，避免了容量過度預留或不足的問題。
+  # 需要了解的額外資訊：
+  # 索引設計：除了主鍵（id）外，是否需要設置全局二級索引（GSI）或本地二級索引（LSI）來支持其他類型的查詢？例如，若要按上傳時間篩選或查詢文件大小，可能需要設定一個基於時間或大小的 GSI。
+  # 吞吐量配置：如果沒有啟用按需計費，還需要設置 ReadCapacityUnits 和 WriteCapacityUnits，並確保這些設置能夠處理預期的流量。
+  # 表的自動擴展：如果使用預設容量模式，如何配置自動擴展來應對流量波動？
   Table:  # 資源名稱為 Table
     Type: AWS::DynamoDB::Table  # 資源類型為 DynamoDB 表
     Properties:  # 資源的屬性
@@ -15,18 +50,63 @@ Resources:  # 定義資源的區塊
       StreamSpecification:  # 設定流的規範
         StreamViewType: NEW_AND_OLD_IMAGES  # 讀取新舊影像的流視圖類型
       TableName: !Sub ${AWS::StackName}-Table  # 表的名稱，使用堆疊名稱作為前綴
+      
+  # 2. FrontEnd (S3 存儲桶)
+  # 在 AWS 中，S3 是一種物件存儲服務，非常適合用來儲存各種靜態資源，例如網站的圖片、JavaScript 文件、CSS 檔案等。你可以將前端資源存儲在 S3 桶中，並通過網址直接提供給終端用戶。
+  # Bucket (存儲桶)：在 S3 中，所有文件都存放在桶中。每個桶都會有一個唯一的名稱，並且是用來組織和管理物件的容器。對於網站或前端應用來說，你可以將 HTML、CSS、JavaScript、圖片等資源放入桶中，並將該桶配置為靜態網站託管。
+  # Public/Private Access Control (存取控制)：S3 提供存取控制設置，你可以設置桶和物件的存取權限。對於前端資源，你通常會讓它們是公開的，以便任何人都可以通過網址訪問它們。
+  # Static Website Hosting (靜態網站託管)：S3 允許你將一個桶配置為靜態網站。這樣，你就能夠將 HTML 文件存放在 S3 中，並通過一個 URL 訪問你的網站。S3 提供的靜態網站託管通常搭配 CloudFront（AWS 的 CDN 服務）來加速網站的加載速度，確保全球用戶能快速訪問網站內容。
+  # 在前端應用中，S3 存儲桶 主要用於儲存靜態資源，並且它的高可用性和擴展性能夠應對大量的網站流量。它還能夠與其他 AWS 服務（例如 Lambda、CloudFront）協同工作，實現更高效的前端資源管理。
 
+  # 用途：S3 (Simple Storage Service) 是 AWS 提供的一個物件存儲服務，用於存儲各類資料（如圖片、文檔、視頻等）。在此架構中，FrontEnd S3 存儲桶用於存儲和提供網站的靜態文件（如 HTML、CSS、JavaScript、圖片等），並且設置為靜態網站托管。
+  # 如何使用：這個存儲桶會被配置為靜態網站托管，並且將 index.html 設定為網站的主頁。用戶通過 HTTP 請求訪問這些文件，進而呈現網站。S3 會根據用戶的請求返回對應的靜態資源，這樣可以簡單且高效地為用戶提供網頁內容。
+  # 缺少後果：如果缺少這個 S3 存儲桶來托管靜態網站文件，您的前端頁面（例如 index.html、CSS、JavaScript 文件等）將無法被加載和顯示給用戶。用戶將無法訪問您的網站，應用的整個前端部分無法運行。前端頁面的展示是整個應用的基礎，沒有它，整個網站就無法正常工作。
+  # 創建依據：
+  # 為什麼使用 S3：S3 用於靜態網站托管非常合適。它不僅提供可靠的存儲服務，還支援靜態網站托管功能。對於沒有後端處理需求的靜態網站，S3 是一個簡單而高效的解決方案。
+  # 資源部署細節：
+  # 靜態網站託管：通過啟用靜態網站托管，將 index.html 設為網站的首頁，確保用戶訪問該 S3 存儲桶時自動加載前端頁面。
+  # 需要了解的額外資訊：
+  # 存取控制：是否需要設定存取控制策略（例如，允許匿名訪問或僅特定 IAM 使用者可訪問）？是否需要使用 S3 存儲桶策略或 ACL（Access Control List）來限制訪問？
+  # 版本控制：是否啟用了版本控制，以便保留舊版本的網站內容或防止錯誤覆蓋？
+  # 日誌設置：是否開啟了 S3 訪問日誌，這有助於記錄訪問日誌以便日後排錯或審計。
   FrontEnd:  # 資源名稱為 FrontEnd
     Type: AWS::S3::Bucket  # 資源類型為 S3 存儲桶
     Properties:  # 資源的屬性
       BucketName: !Sub ${AWS::StackName}-frontend  # 存儲桶名稱，使用堆疊名稱作為前綴
       WebsiteConfiguration:  # 設定網站配置
         IndexDocument: index.html  # 指定網站的索引文檔
-
+        
+  # 3. FileStore (S3 存儲桶)：用於存放文件，例如用戶上傳的文件或應用所需的靜態資源。
+  # 用途：這個 S3 存儲桶用於存儲文件內容，比如用戶上傳的文件或應用所需的靜態資源（例如圖片、音頻、視頻文件）。這個桶與 FrontEnd 桶不同，它主要處理文件存儲而非靜態網站。
+  # 如何使用：您可以將用戶上傳的文件（如音頻、圖片等）儲存在這個存儲桶中，並根據需求進行管理（如刪除、更新等）。S3 提供的高可用性和擴展性可以確保文件的長期存儲和高效檢索。
+  # 缺少後果：如果缺少這個 S3 存儲桶來存儲文件，您將無法存儲用戶上傳的文件或應用需要的靜態資源。這意味著用戶無法上傳文件，且文件也無法持久存儲。用戶的數據將丟失，應用將無法提供或處理文件，嚴重影響應用的基本功能。
+  # 創建依據：
+  # 為什麼使用 S3：FileStore S3 存儲桶用於保存實際的用戶文件，例如上傳的圖片、視頻或其他格式的文件。S3 提供了高可靠性、可擴展性和多樣的存儲選項，特別適合用來保存大規模的靜態資源。
+  # 資源部署細節：
+  # 無需靜態網站配置：FileStore 只需要用來儲存文件，不需要像 FrontEnd 那樣配置靜態網站托管。
+  # 需要了解的額外資訊：
+  # 存取控制：是否需要設置存取控制策略來限制對文件的訪問，或者是否應該開放給公共訪問？
+  # 存儲類型選擇：S3 提供不同的存儲類型（如 Standard、Infrequent Access、Glacier 等）。根據文件存儲的頻繁性和長期存儲需求，你可能需要選擇不同的存儲類型來優化成本。
+  # 加密設置：是否需要對存儲在 S3 中的文件進行加密？S3 支持伺服器端加密（SSE）來保護數據。
   FileStore:  # 資源名稱為 FileStore
     Type: AWS::S3::Bucket  # 資源類型為 S3 存儲桶
     Properties:  # 資源的屬性
       BucketName: !Sub ${AWS::StackName}-filestore  # 存儲桶名稱，使用堆疊名稱作為前綴
+      
+      
+  # 4. CreateNewFile (Lambda 函數)：當接收到 POST 請求時，該函數負責創建新文件，將其上傳至 FileStore S3 存儲桶，並將文件相關數據保存到 DynamoDB 表中。
+  # 用途：這個 Lambda 函數用來處理 HTTP POST 請求，並根據請求創建新文件。當用戶上傳一個新文件時，該函數會將文件內容上傳到 FileStore S3 存儲桶中，並將文件的 metadata（如名稱、大小、上傳時間等）保存在 DynamoDB 表中。
+  # 如何使用：當收到 POST 請求時，Lambda 會觸發文件上傳流程。它會通過 AWS SDK 將文件上傳到 S3 存儲桶，並將相關信息（例如文件名稱、URL）存入 DynamoDB 以供未來查詢。
+  # 缺少後果：如果缺少這個 Lambda 函數來處理 POST 請求並創建新文件，應用將無法處理用戶上傳的文件。即使用戶嘗試上傳文件，也不會有任何處理流程來將文件保存到 FileStore S3 存儲桶中，並且缺少文件的 metadata 會無法保存至 DynamoDB 表。這將導致上傳功能完全無法運作。
+  # 創建依據：
+  # 為什麼使用 Lambda：Lambda 是無伺服器運算服務，適合處理短期、事件驅動的工作負載。在這個場景中，當用戶上傳新文件時，我們需要一個事件驅動的函數來處理文件的上傳和 metadata 的儲存。
+  # 處理邏輯：此 Lambda 函數會從請求中提取文件內容並將文件存儲到 FileStore S3 存儲桶中，同時將文件的 metadata 保存到 DynamoDB 表。
+  # 資源部署細節：
+  # 觸發方式：此 Lambda 函數通常會與 API Gateway 配合使用，將 POST 請求傳遞給 Lambda 進行處理。
+  # 需要了解的額外資訊：
+  # IAM 角色與權限：Lambda 函數執行時所需要的 IAM 角色應該具備哪些權限？例如，需要能夠寫入 S3、操作 DynamoDB 表以及可能需要寫入 CloudWatch Logs 用於日誌記錄。
+  # 錯誤處理與重試策略：如何設計錯誤處理機制，防止上傳過程中出現錯誤時丟失信息？是否設置了重試策略或死信隊列（DLQ）來處理失敗的請求？
+  # 內存與超時設置：Lambda 函數的內存和執行時間設定，這直接影響其處理速度和成本。如果上傳文件比較大，可能需要調整這些設置。
   CreateNewFile:  # 資源名稱為 CreateNewFile
     Type: AWS::Serverless::Function  # 資源類型為 AWS Serverless 函數
     Properties:  # 資源的屬性
@@ -82,6 +162,18 @@ Resources:  # 定義資源的區塊
             ApiId: !Ref HttpApi  # 指向 HttpApi 的引用
             PayloadFormatVersion: '2.0'  # 載荷格式版本
             TimeoutInMillis: 29000  # 事件的超時時間設為 29000 毫秒
+            
+  # 5. DeleteFile (Lambda 函數)：處理 DELETE 請求，負責從 S3 存儲桶中刪除指定文件，並在 DynamoDB 表中刪除文件的 metadata。
+  # 用途：這個 Lambda 函數用於處理 DELETE 請求，負責刪除指定的文件。它會從 FileStore S3 存儲桶中刪除文件，同時在 DynamoDB 表中刪除與該文件相關的 metadata。
+  # 如何使用：當收到 DELETE 請求時，Lambda 函數會根據請求中提供的文件識別符（如文件 ID）來查找並刪除 S3 存儲桶中的該文件，並從 DynamoDB 中移除相關記錄，確保資料一致性。
+  # 缺少後果：如果缺少這個 Lambda 函數來處理 DELETE 請求，應用將無法刪除用戶上傳的文件。不僅如此，對應文件的 metadata 也無法在 DynamoDB 表中刪除，導致資料庫中的記錄與實際存儲桶中的文件狀態不同步，可能會造成資料不一致的問題，影響應用的數據管理。
+  # 創建依據：
+  # 為什麼使用 Lambda：刪除文件是另一個典型的事件驅動任務，這使得 Lambda 成為最佳選擇。當用戶發送刪除請求時，我們需要一個函數來從 S3 中刪除文件，並且更新 DynamoDB 中的 metadata。
+  # 資源部署細節：
+  # 觸發方式：此 Lambda 函數通常會與 API Gateway 配合使用，將 DELETE 請求傳遞給 Lambda 進行處理。
+  # 需要了解的額外資訊：
+  # 錯誤處理與回滾機制：如果從 S3 刪除文件或更新 DynamoDB 表時發生錯誤，應該如何處理？是否需要回滾先前的操作，或者設置補償機制？
+  # 觸發設置：如何設置正確的觸發條件，確保該函數僅在需要時執行（例如來自 API Gateway 的 DELETE 請求），避免不必要的運行。
   DeleteFile:  # 資源名稱為 DeleteFile
     Type: AWS::Serverless::Function  # 資源類型為 AWS Serverless 函數
     Properties:  # 資源的屬性
@@ -132,6 +224,18 @@ Resources:  # 定義資源的區塊
             ApiId: !Ref HttpApi  # 指向 HttpApi 的引用
             PayloadFormatVersion: '2.0'  # 載荷格式版本
             TimeoutInMillis: 29000  # 事件的超時時間設為 29000 毫秒
+            
+  # 6. GetVoices (Lambda 函數)：處理 GET 請求，調用 AWS Polly API 獲取語音列表，用於應用中可能的語音選項。
+  # 用途：這個 Lambda 函數會處理 GET 請求，並調用 AWS Polly API 來獲取語音列表。AWS Polly 是一個文本轉語音服務，可以生成自然聽感的語音。這個函數的作用是獲取可用語音的選項，供應用或前端展示給用戶選擇。
+  # 如何使用：當用戶想選擇不同語音時，這個 Lambda 函數會與 AWS Polly 進行交互，獲取支持的語音選項列表（如語音類型、語言等），並將其返回給用戶端，讓用戶進行選擇。
+  # 缺少後果：如果缺少這個 Lambda 函數來調用 AWS Polly API 並獲取語音列表，用戶將無法查看和選擇可用的語音選項。這會對涉及語音功能的應用（如語音合成、語音選擇等）造成影響，甚至會使得這部分功能無法使用。
+  # 創建依據：
+  # 為什麼使用 Lambda 和 Polly：此 Lambda 函數負責調用 AWS Polly 服務以獲取語音列表。Lambda 提供了高度靈活的計算能力，而 Polly 是一個高度可擴展的語音合成服務，適合需要語音選項的應用。
+  # 資源部署細節：
+  # 觸發方式：此函數將根據 GET 請求返回語音列表，通常會與 API Gateway 配合使用。
+  # 需要了解的額外資訊：
+  # AWS Polly API 配置：Lambda 函數如何調用 AWS Polly API 來獲取語音列表？是否已經設置了適當的 API 訪問權限？
+  # 響應格式與錯誤處理：返回語音列表時，Lambda 需要返回什麼樣的響應？是否有設置錯誤處理邏輯以處理 API 請求失敗的情況？
   GetVoices:  # 資源名稱為 GetVoices
     Type: AWS::Serverless::Function  # 資源類型為 AWS Serverless 函數
     Properties:  # 資源的屬性
@@ -164,6 +268,18 @@ Resources:  # 定義資源的區塊
             ApiId: !Ref HttpApi  # 指向 HttpApi 的引用
             PayloadFormatVersion: '2.0'  # 載荷格式版本
             TimeoutInMillis: 29000  # 事件的超時時間設為 29000 毫秒
+            
+  # 7. ListFiles (Lambda 函數)：處理 GET 請求，列出 DynamoDB 表中的文件信息，可以用於前端展示所有文件列表。
+  # 用途：這個 Lambda 函數用來處理 GET 請求，並查詢 DynamoDB 表中存儲的文件 metadata。它會列出表中的所有文件信息，並將這些信息返回給前端，用於顯示所有已上傳文件的列表。
+  # 如何使用：該函數查詢 DynamoDB 表中所有存儲的文件條目，並返回一個文件列表給前端。這樣，用戶就可以查看到所有上傳的文件，包括其名稱、大小、上傳時間等信息。
+  # 缺少後果：如果缺少這個 Lambda 函數來處理 GET 請求並列出 DynamoDB 表中的文件，您的前端將無法顯示所有已上傳文件的列表。這意味著用戶無法查看他們已上傳的文件，無法進行後續操作（如刪除文件或查看文件信息）。這會極大影響應用的使用體驗，特別是在文件管理部分。
+  # 創建依據：
+  # 為什麼使用 Lambda：這個 Lambda 函數的作用是列出 DynamoDB 表中的所有文件 metadata，這樣前端可以展示文件列表。Lambda 讓我們能夠在不需要管理伺服器的情況下處理這樣的讀取操作。
+  # 資源部署細節：
+  # 觸發方式：通常與 API Gateway 配合，將 GET 請求傳遞給 Lambda 來查詢 DynamoDB 中的所有文件。
+  # 需要了解的額外資訊：
+  # DynamoDB 查詢優化：在 Lambda 函數中，如何設計查詢 DynamoDB 表的邏輯以高效地列出文件？是否會使用投影（Projection）來減少不必要的數據傳輸？
+  # 分頁機制：如果表中包含大量的文件，如何設計 Lambda 函數支持分頁，以防止過多數據一次性返回而導致超時或性能問題？
   ListFiles:  # 資源名稱為 ListFiles
     Type: AWS::Serverless::Function  # 資源類型為 AWS Serverless 函數
     Properties:  # 資源的屬性
@@ -201,6 +317,19 @@ Resources:  # 定義資源的區塊
             ApiId: !Ref HttpApi  # 指向 HttpApi 的引用
             PayloadFormatVersion: '2.0'  # 載荷格式版本
             TimeoutInMillis: 29000  # 事件的超時時間設為 29000 毫秒
+            
+  # 8. Website (CodeBuild 項目)：負責前端網站的自動構建和部署。該項目從指定的 Git 倉庫克隆代碼，安裝依賴，構建並將前端部署到 FrontEnd S3 存儲桶中。
+  # 用途：AWS CodeBuild 是一個完全託管的構建服務，用來自動化應用程序的構建過程。這個項目負責從指定的 Git 倉庫中克隆前端代碼，並自動構建該代碼，然後將構建產物部署到 FrontEnd S3 存儲桶中，從而更新網站。
+  # 如何使用：每當代碼庫中的前端代碼有變動（例如提交新的代碼），CodeBuild 會自動運行，安裝必要的依賴、構建網站，並將最新的靜態文件上傳到 S3 存儲桶中，保證前端內容始終是最新的。
+  # 缺少後果：如果缺少這個 CodeBuild 項目來自動構建和部署前端，您的網站將無法自動更新。如果您有任何前端代碼的更新，這些更改將無法自動構建並部署到 FrontEnd S3 存儲桶中，可能需要手動進行構建和部署。這不僅增加了維護的複雜性，還可能導致網站始終顯示過時的內容，影響用戶體驗。
+  # 創建依據：
+  # 為什麼使用 CodeBuild：CodeBuild 是一個完全管理的構建服務，能夠自動構建和部署前端代碼。這樣可以確保每次代碼更新後，網站會自動構建並部署到 FrontEnd S3 存儲桶中。
+  # 資源部署細節：
+  # 構建和部署流程：CodeBuild 會從 Git 倉庫克隆代碼，安裝依賴並執行構建腳本，然後將構建後的文件部署到 S3 存儲桶。
+  # 需要了解的額外資訊：
+  # 構建環境配置：CodeBuild 項目所用的 Docker 映像（aws/codebuild/standard:5.0）是否已經根據前端框架進行過最佳化？是否需要安裝額外的工具來支持特定的構建流程？
+  # 構建過程中的步驟：構建過程中具體的構建腳本內容（例如，是否使用 npm install 來安裝依賴，並使用 npm run build 來構建網站）。如何確保構建成功後自動部署？
+  # 通知機制：如果構建失敗，是否設置了通知機制（例如，通過 SNS 或 CloudWatch 通知相關人員）？
   Website:  # 資源名稱為 Website
     Type: AWS::CodeBuild::Project  # 資源類型為 CodeBuild 項目
     DependsOn: WebsiteRole  # 依賴於 WebsiteRole 資源
@@ -248,6 +377,18 @@ Resources:  # 定義資源的區塊
       Tags:  # 標籤配置
         - Key: StackName  # 標籤鍵
           Value: !Sub ${AWS::StackName}  # 標籤值，使用堆疊名稱
+          
+  # 9. WebsiteEvents (EventBridge 規則)：監控 CodeBuild 構建狀態，觸發後續事件（例如發送通知或更新狀態）。
+  # 用途：AWS EventBridge 是一個事件總線服務，用於在 AWS 服務之間傳遞事件。WebsiteEvents 規則監控 CodeBuild 的構建狀態，當構建完成或出現錯誤時，會觸發相應的事件處理流程，例如發送通知或更新系統狀態。
+  # 如何使用：當 CodeBuild 完成構建任務時，EventBridge 會捕捉到構建成功或失敗的事件，並根據預先設置的規則觸發後續操作。這可以包括發送 SNS 通知、更新應用狀態，或觸發其他流程。
+  # 缺少後果：如果缺少這個 EventBridge 規則來監控 CodeBuild 構建狀態，您將無法及時知道構建是否成功或失敗。這可能會使您錯過構建過程中的錯誤或延遲，並且無法根據事件自動執行後續操作（如發送通知、更新狀態等）。缺少這樣的監控和自動處理可能會導致問題難以及時發現和處理。
+  # 創建依據：
+  # 為什麼使用 EventBridge：EventBridge 用於監控並觸發事件，這對於自動化流程非常重要。例如，當 CodeBuild 完成構建後，可以通過 EventBridge 觸發其他操作（如發送通知、觸發測試或部署其他服務）。
+  # 資源部署細節：
+  # 規則設置：此規則會根據 CodeBuild 的狀態觸發相應的後續事件。
+  # 需要了解的額外資訊：
+  # 事件過濾和目標設置：在 EventBridge 規則中，如何設置精確的事件過濾條件來觸發後續操作？如何確保事件只觸發在 CodeBuild 完成構建後（並非每次都有觸發）？
+  # 多目標設置：如果一個事件需要觸發多個後續操作（例如，發送通知並啟動其他 Lambda 函數），如何設置多個目標？
   WebsiteEvents:  # 資源名稱為 WebsiteEvents
     Type: AWS::Events::Rule  # 資源類型為 EventBridge 規則
     DependsOn: Website  # 依賴於 Website 資源
