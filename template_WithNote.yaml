@@ -387,7 +387,7 @@ Resources:  # 定義資源的區塊
   # 資源部署細節：
   # 規則設置：此規則會根據 CodeBuild 的狀態觸發相應的後續事件。
   # 需要了解的額外資訊：
-  # 事件過濾和目標設置：在 EventBridge 規則中，如何設置精確的事件過濾條件來觸發後續操作？如何確保事件只觸發在 CodeBuild 完成構建後（並非每次都有觸發）？
+  # 事件過濾和目標設置：在 EventBridge 規則中，如何設置精確的事件過濾條件來觸發後續操作？如何確保事件只觸發在 CodeBuild 完成構建後（並非每次都有觸發）
   # 多目標設置：如果一個事件需要觸發多個後續操作（例如，發送通知並啟動其他 Lambda 函數），如何設置多個目標？
   WebsiteEvents:  # 資源名稱為 WebsiteEvents
     Type: AWS::Events::Rule  # 資源類型為 EventBridge 規則
